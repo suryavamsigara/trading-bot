@@ -9,7 +9,7 @@ Two modes: **interactive menu** with live price context, or **single-shot CLI fl
 
 ```
 trading_bot/
-├── bot/
+├── agent/
 │   ├── __init__.py
 │   ├── client.py          # HTTP client - signing, requests, error handling
 │   ├── orders.py          # Order placement logic, returns typed OrderResult
@@ -17,7 +17,7 @@ trading_bot/
 │   └── logging_config.py  # Dual-channel: JSON-lines file + coloured console
 ├── cli.py                 # CLI entry point (interactive + single-shot)
 ├── logs/                  # Auto-created on first run
-├── requirements.txt
+├── pyproject.toml
 └── README.md
 ```
 
@@ -59,7 +59,7 @@ export BINANCE_API_KEY="your_key_here"
 export BINANCE_API_SECRET="your_secret_here"
 ```
 
-Or pass inline with `--api-key` / `--api-secret`. or save in .env file
+Or pass inline with `--api-key` / `--api-secret` or save in .env file
 
 ---
 
