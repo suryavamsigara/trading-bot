@@ -45,8 +45,12 @@ class BinanceClient:
         params = kwargs.pop("params", {})
         if signed:
             params = self._sign(params)
+        
+        log_params = params.copy()
+        if "signature" in log_params:
+            log_params["signature"] = "******" 
 
-        logger.info("→ %s %s | params=%s", method.upper(), path, params)
+        logger.info("→ %s %s | params=%s", method.upper(), path, log_params)
         try:
             if method.upper() == "POST":
                 resp = self._client.request(method, path, data=params, **kwargs) # Use 'data'
