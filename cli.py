@@ -1,137 +1,128 @@
 import os
 import sys
-import time
-import hmac
-import hashlib
 import argparse
-import requests
 from dotenv import load_dotenv
-from urllib.parse import urlencode
+from client import BinanceClient, OrderResult
 
 load_dotenv()
 
-BASE_URL = "https://testnet.binancefuture.com"
+R = "\x1b[0m"
+BOLD = "\x1b[1m"
+DIM = "\x1b[2m"
+GREEN = "\x1b[38;5;84m"
+RED = "\x1b[38;5;203m"
+YELLOW = "\x1b[38;5;220m"
+CYAN = "\x1b[38;5;87m"
+MAGENTA = "\x1b[38;5;177m"
+WHITE = "\x1b[38;5;255m"
+GREY = "\x1b[38;5;245m"
 
-class BinanceClient:    
-    def __init__(self, api_key: str, api_secret: str):
-        self.api_key = api_key
-        self.api_secret = api_secret.encode()
-        self.session = requests.Session()
-        self.session.headers.update({
-            "X-MBX-APIKEY": self.api_key
-        })
+BUY_COL = GREEN
+SELL_COL = RED
 
-    def _sign(self, params: dict) -> dict:
-        """Adds a timestamp and HMAC-SHA256 signature to the payload."""
-        params["timestamp"] = int(time.time() * 1000)
-        query_string = urlencode(params)
-        signature = hmac.new(self.api_secret, query_string.encode(), hashlib.sha256).hexdigest()
-        params["signature"] = signature
-        return params
+def _c(text, *codes) -> str:
+    return "".join(codes) + str(text) + R
 
-    def get_price(self, symbol: str) -> float:
-        """Fetches the current price of a symbol."""
-        url = f"{BASE_URL}/fapi/v1/ticker/price"
-        response = self.session.get(url, params={"symbol": symbol.upper()})
-        response.raise_for_status()
-        return float(response.json()["price"])
+def banner() -> None:
+    print(f"""
+{_c('╔══════════════════════════════════════════════╗', BOLD, CYAN)}
+{_c('║', BOLD, CYAN)}   {_c('  Binance Futures Testnet Trading Bot', BOLD, WHITE)}      {_c('║', BOLD, CYAN)}
+{_c('╚══════════════════════════════════════════════╝', BOLD, CYAN)}
+""")
 
-    def place_order(self, symbol: str, side: str, order_type: str, quantity: str, price: str = None) -> dict:
-        """Places a MARKET or LIMIT order."""
-        url = f"{BASE_URL}/fapi/v1/order"
-        
-        params = {
-            "symbol": symbol.upper(),
-            "side": side.upper(),
-            "type": order_type.upper(),
-            "quantity": str(quantity),
-        }
-        
-        if order_type.upper() == "LIMIT":
-            if not price:
-                raise ValueError("Price is required for LIMIT orders.")
-            params["price"] = str(price)
-            params["timeInForce"] = "GTC"
-            
-        if order_type.upper() == "STOP_MARKET":
-            if not price:
-                raise ValueError("Stop price is required for STOP_MARKET orders.")
-            params["stopPrice"] = str(price)
+def _separator() -> None:
+    print(_c("─" * 48, DIM, GREY))
 
-        signed_params = self._sign(params)
-        response = self.session.post(url, data=signed_params)
+def _prompt(label: str, hint: str = "", default: str = "") -> str:
+    hint_str = f" {_c('(' + hint + ')', DIM, GREY)}" if hint else ""
+    default_str = f" {_c('[' + default + ']', DIM, CYAN)}" if default else ""
+    raw = input(f"  {_c('▸', BOLD, CYAN)} {_c(label, WHITE)}{hint_str}{default_str}: ").strip()
+    return raw if raw else default
 
-        if response.status_code != 200:
-            print(f"\n[X] Order Failed: {response.text}")
-            return {}
-            
-        return response.json()
-
-def run_interactive(client: BinanceClient):
-    print("\n=== Binance Futures Testnet Bot ===")
-    
+def _ask_choice(label: str, choices: list[str]) -> str:
+    print(f"\n  {_c(label, BOLD, WHITE)}")
+    for i, c in enumerate(choices, 1):
+        print(f"    {_c(str(i) + '.', CYAN)} {c}")
     while True:
-        print("\nOptions: [1] Place Order  [2] Check Price  [3] Exit")
-        action = input("Choose an option (1/2/3): ").strip()
-        
-        if action == "3":
-            print("Exiting..")
+        raw = input(f"  {_c('▸', BOLD, CYAN)} Choice: ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(choices):
+            return choices[int(raw) - 1]
+        print(f"  {_c('! Enter a number 1–' + str(len(choices)), YELLOW)}")
+
+def print_result(result: OrderResult) -> None:
+    if not result.success:
+        print(f"\n  {_c('✗ ORDER FAILED', BOLD, RED)}")
+        print(f"  {_c(result.error, RED)}\n")
+        return
+
+    side_col = BUY_COL if result.side == "BUY" else SELL_COL
+    print(f"\n  {_c('✓ ORDER PLACED', BOLD, GREEN)}\n")
+    print(f"  {'Order ID':<18} {_c(result.order_id, BOLD, WHITE)}")
+    print(f"  {'Symbol':<18} {_c(result.symbol, WHITE)}")
+    print(f"  {'Side':<18} {_c(result.side, BOLD, side_col)}")
+    print(f"  {'Type':<18} {_c(result.order_type, MAGENTA)}")
+    print(f"  {'Status':<18} {_c(result.status, BOLD, GREEN)}")
+    _separator()
+
+def run_interactive(client: BinanceClient) -> None:
+    banner()
+    while True:
+        print(f"\n  {_c('What would you like to do?', BOLD, WHITE)}")
+        action = _ask_choice("", ["Place a new order", "Check live price", "Exit"])
+
+        if action == "Exit":
+            print(f"\n  {_c('Goodbye..', DIM, GREY)}\n")
             break
-            
-        elif action == "2":
-            sym = input("Symbol (e.g. BTCUSDT): ").strip().upper() or "BTCUSDT"
-            try:
-                price = client.get_price(sym)
-                print(f"  {sym} Live Price: ${price:,.4f}")
-            except Exception as e:
-                print(f"  [!] Error fetching price: {e}")
-                
-        elif action == "1":
-            symbol = input("Symbol (e.g. BTCUSDT): ").strip().upper()
-            side = input("Side (BUY/SELL): ").strip().upper()
-            order_type = input("Type (MARKET/LIMIT/STOP_MARKET): ").strip().upper()
-            qty = input("Quantity (e.g. 0.001): ").strip()
 
-            price = None
-            if order_type in ["LIMIT", "STOP_MARKET"]:
-                price = input("Price (Limit or Stop): ").strip()
-
-            print(f"\nPlacing {side} {qty} {symbol} ({order_type})...")
+        if action == "Check live price":
+            sym = _prompt("Symbol", "e.g. BTCUSDT", "BTCUSDT").upper()
             try:
-                result = client.place_order(symbol, side, order_type, qty, price)
-                if result:
-                    print(f"\nOrder Success!")
-                    print(f"    ID:     {result.get('orderId')}")
-                    print(f"    Status: {result.get('status')}")
-            except Exception as e:
-                print(f"  [!] Error: {e}")
+                p = client.get_price(sym)
+                print(f"\n  {_c(sym, BOLD, WHITE)}  →  {_c(f'${p:,.4f}', BOLD, GREEN)}\n")
+            except Exception as exc:
+                print(f"\n  {_c('Error: ' + str(exc), RED)}\n")
+            continue
+
+        print(f"\n  {_c('NEW ORDER', BOLD, CYAN)}\n")
+        symbol = _prompt("Symbol", "e.g. BTCUSDT", "BTCUSDT").upper()
+        side = _ask_choice("Side", ["BUY", "SELL"])
+        order_type = _ask_choice("Order type", ["MARKET", "LIMIT", "STOP_MARKET"])
+        quantity = _prompt("Quantity", "e.g. 0.001")
+
+        price = _prompt("Limit price", "e.g. 29000") if order_type == "LIMIT" else None
+        stop_price = _prompt("Stop trigger price", "e.g. 28000") if order_type == "STOP_MARKET" else None
+
+        confirm = input(f"  {_c('▸', BOLD, CYAN)} {_c('Confirm Order? [y/N]: ', WHITE)}").strip().lower()
+        if confirm != "y":
+            print(f"\n  {_c('Order cancelled.', YELLOW)}\n")
+            continue
+
+        result = client.place_order(symbol, side, order_type, quantity, price, stop_price)
+        print_result(result)
 
 def main():
-    parser = argparse.ArgumentParser(description="Binance Testnet Bot")
+    parser = argparse.ArgumentParser(prog="trading_bot")
     parser.add_argument("--symbol", help="Trading pair, e.g. BTCUSDT")
     parser.add_argument("--side", choices=["BUY", "SELL"])
     parser.add_argument("--type", choices=["MARKET", "LIMIT", "STOP_MARKET"])
     parser.add_argument("--qty", help="Order quantity")
-    parser.add_argument("--price", help="Price for LIMIT or STOP_MARKET orders")
+    parser.add_argument("--price", default=None, help="Limit price")
+    parser.add_argument("--stop-price", dest="stop_price", default=None)
     args = parser.parse_args()
 
-    api_key = os.getenv("BINANCE_API_KEY")
-    api_secret = os.getenv("BINANCE_API_SECRET")
+    api_key = os.getenv("BINANCE_API_KEY", "")
+    api_secret = os.getenv("BINANCE_API_SECRET", "")
 
     if not api_key or not api_secret:
-        print("Error: BINANCE_API_KEY and BINANCE_API_SECRET environment variables must be set.")
+        print(f"\n  {_c('Error:', BOLD, RED)} API credentials not set (BINANCE_API_KEY / BINANCE_API_SECRET).\n")
         sys.exit(1)
 
     client = BinanceClient(api_key, api_secret)
 
     if args.symbol and args.side and args.type and args.qty:
-        try:
-            result = client.place_order(args.symbol, args.side, args.type, args.qty, args.price)
-            if result:
-                print(f"Order Placed! ID: {result.get('orderId')} | Status: {result.get('status')}")
-        except Exception as e:
-            print(f"[!] Error: {e}")
-            sys.exit(1)
+        result = client.place_order(args.symbol, args.side, args.type, args.qty, args.price, args.stop_price)
+        print_result(result)
+        sys.exit(0 if result.success else 1)
     else:
         run_interactive(client)
 
